@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Configuración GOKART</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      background-color: #1e1e2f;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', sans-serif;
+      padding: 20px;
+      margin: 0;
+      max-width: 600px;
+      margin: auto;
+    }
+
+    h2 {
+      background-color: #2a2a40;
+      padding: 12px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    h3 {
+      margin-top: 20px;
+      background-color: #39424f;
+      padding: 10px;
+      border-radius: 6px;
+      text-align: center;
+    }
+
+    label {
+      display: block;
+      margin-top: 16px;
+      font-weight: bold;
+    }
+
+    input, button, select {
+      width: 100%;
+      padding: 10px;
+      margin-top: 8px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 6px;
+    }
+
+    input, select {
+      background-color: #2c2c3a;
+      color: white;
+    }
+
+    button {
+      background-color: #4caf50;
+      color: white;
+      font-weight: bold;
+      margin-top: 20px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #45a045;
+    }
+
+    #emergencia {
+      background-color: #c62828;
+      margin-top: 10px;
+    }
+
+    .switch {
+      display: flex;
+      align-items: center;
+      margin-top: 10px;
+    }
+
+    .switch input {
+      margin-right: 10px;
+      transform: scale(1.2);
+    }
+
+    #estado {
+      font-weight: bold;
+      margin-top: 20px;
+      font-size: 18px;
+      text-align: center;
+      background-color: #39424f;
+      padding: 10px;
+      border-radius: 6px;
+    }
+
+    .alerta {
+      color: #ff5555;
+      margin-top: 10px;
+      font-weight: bold;
+    }
+
+    #debugLog {
+      margin-top: 20px;
+      background-color: #2a2a2a;
+      padding: 10px;
+      border-radius: 6px;
+      max-height: 200px;
+      overflow-y: auto;
+      font-size: 0.9rem;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <h2 id="titulo">🛠 Configuración GOKART</h2>
+
+  <h3>Selecciona el GOKART</h3>
+  <select id="gokart_selector" onchange="actualizarGokartSeleccionado()">
+    <option value="todos">🧩 Configurar TODOS los GOKARTs</option>
+  </select>
+
+  <div id="estado">🧠 Conectando...</div>
+
+  <label>Velocidad máxima frente (0–100%):</label>
+  <input id="vel_frente" type="number" min="0" max="100" value="50" />
+
+  <label>Velocidad máxima reversa (0–100%):</label>
+  <input id="vel_reversa" type="number" min="0" max="100" value="30" />
+
+  <label>Tiempo de activación (segundos):</label>
+  <input id="tiempo" type="number" min="0" value="60" />
+
+  <div class="switch">
+    <input id="encendido" type="checkbox" />
+    <label for="encendido">Encendido</label>
+  </div>
+
+  <div class="switch">
+    <input id="iluminacion" type="checkbox" />
+    <label for="iluminacion">Iluminación</label>
+  </div>
+
+  <button onclick="enviarDatos()">Enviar configuración</button>
+  <button id="emergencia" onclick="enviarEmergencia()">⛔ Paro de emergencia</button>
+
+  <div class="alerta" id="alertas"></div>
+  <div id="debugLog"></div>
+
+  <script>
+    const estado = document.getElementById("estado");
+    const titulo = document.getElementById("titulo");
+    const alertas = document.getElementById("alertas");
+    const debugLog = document.getElementById("debugLog");
+    const selector = document.getElementById("gokart_selector");
+    let gokartsOnline = {};
+    let gokartSeleccionado = "todos";
+
+    function logDebug(msg) {
+      const now = new Date().toLocaleTimeString();
+      debugLog.innerHTML += `[${now}] ${msg}<br>`;
+      debugLog.scrollTop = debugLog.scrollHeight;
+    }
+
+    function actualizarGokartSeleccionado() {
+      gokartSeleccionado = selector.value;
+      titulo.textContent = gokartSeleccionado === "todos"
+        ? "🛠 Configuración de TODOS los GOKARTs"
+        : `🛠 Configuración de ${gokartSeleccionado}`;
+    }
+
+    function cargarGokartsOnline() {
+      const gokarts = JSON.parse(localStorage.getItem("gokarts") || "{}");
+      const nombres = Object.keys(gokarts);
+      nombres.forEach(nombre => {
+        const ip = gokarts[nombre];
+        const ws = new WebSocket("ws://" + ip + "/ws");
+        const timer = setTimeout(() => ws.close(), 2000);
+        ws.onopen = () => {
+          clearTimeout(timer);
+          gokartsOnline[nombre] = ip;
+          const opt = document.createElement("option");
+          opt.value = nombre;
+          opt.textContent = nombre;
+          selector.appendChild(opt);
+          logDebug(`🟢 ${nombre} (${ip}) conectado.`);
+        };
+        ws.onerror = () => logDebug(`🔴 ${nombre} (${ip}) no respondió.`);
+      });
+    }
+
+    function enviarDatos() {
+      alertas.innerHTML = "";
+      debugLog.innerHTML = "";
+      const datos = {
+        velocidad_frente: parseInt(document.getElementById("vel_frente").value),
+        velocidad_reversa: parseInt(document.getElementById("vel_reversa").value),
+        tiempo_activacion: parseInt(document.getElementById("tiempo").value),
+        encendido: document.getElementById("encendido").checked,
+        iluminacion: document.getElementById("iluminacion").checked
+      };
+
+      if (gokartSeleccionado === "todos") {
+        let fallidos = [];
+        let exitosos = [];
+        let total = Object.keys(gokartsOnline).length;
+        let completados = 0;
+
+        for (const nombre in gokartsOnline) {
+          const ip = gokartsOnline[nombre];
+          const ws = new WebSocket("ws://" + ip + "/ws");
+
+          ws.onopen = () => {
+            ws.send(JSON.stringify({ nombre_gokart: nombre, ...datos }));
+            exitosos.push(nombre);
+            logDebug(`✅ Enviado a ${nombre}`);
+            if (++completados === total) mostrarResumen();
+          };
+
+          ws.onerror = () => {
+            fallidos.push(nombre);
+            logDebug(`❌ Error con ${nombre}`);
+            if (++completados === total) mostrarResumen();
+          };
+        }
+
+        function mostrarResumen() {
+          estado.textContent = `✅ Enviado a: ${exitosos.join(", ")}`;
+          if (fallidos.length > 0) {
+            alertas.innerHTML = `⚠️ No respondieron: ${fallidos.join(", ")}`;
+          }
+        }
+      } else {
+        const ip = gokartsOnline[gokartSeleccionado];
+        if (!ip) return alert("El gokart seleccionado no está conectado.");
+
+        const ws = new WebSocket("ws://" + ip + "/ws");
+        ws.onopen = () => {
+          ws.send(JSON.stringify({ nombre_gokart: gokartSeleccionado, ...datos }));
+          estado.textContent = `✅ Configuración enviada a ${gokartSeleccionado}`;
+          logDebug(`✅ Configuración enviada a ${gokartSeleccionado}`);
+        };
+        ws.onerror = () => {
+          alertas.innerHTML = `❌ Error al conectar con ${gokartSeleccionado}`;
+          logDebug(`❌ Fallo al conectar con ${gokartSeleccionado}`);
+        };
+      }
+    }
+
+    function enviarEmergencia() {
+      debugLog.innerHTML = "";
+      for (const nombre in gokartsOnline) {
+        const ip = gokartsOnline[nombre];
+        const ws = new WebSocket("ws://" + ip + "/ws");
+        ws.onopen = () => {
+          ws.send(JSON.stringify({ emergencia: true, nombre_gokart: nombre }));
+          logDebug(`🚨 Paro de emergencia enviado a ${nombre}`);
+        };
+      }
+      estado.textContent = "🚨 Paro de emergencia enviado a todos";
+      estado.style.color = "#f44336";
+    }
+
+    cargarGokartsOnline();
+  </script>
+</body>
+</html>
